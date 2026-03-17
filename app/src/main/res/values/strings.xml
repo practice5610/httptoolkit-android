@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">HTTP Toolkit</string>
+    <string name="app_name">Ludo Interceptor</string>
 
     <string name="vpn_active_notification_title">Interception active</string>
     <string name="vpn_active_notification_content">HTTP Toolkit is currently intercepting this device</string>
@@ -13,6 +13,8 @@
 
     <string name="disconnected_details">To intercept this device, start HTTP Toolkit on your computer, and activate Android interception there via QR code or using ADB.</string>
     <string name="disconnected_no_camera_details">To intercept this device, start HTTP Toolkit on your computer, and activate Android interception there using the ADB or Frida options.</string>
+    <string name="disconnected_details_ludo">Intercept Ludo King traffic and log the auth token. Install the CA when prompted, then connect.</string>
+    <string name="connected_details_ludo">Intercepting Ludo King only. Auth tokens are logged to Logcat (tag LUDO_AUTH).</string>
 
     <string name="connected_details">to %s on port %d</string>
     <string name="connected_tunnel_details">via ADB tunnel</string>
@@ -30,6 +32,7 @@
     <string name="pre_v7_connection_status_details">Traffic from all intercepted applications will be available, except those using explicit certificate pinning.</string>
 
     <string name="scan_button">Scan QR code</string>
+    <string name="connect_button">Connect</string>
     <string name="reconnect_button">Reconnect</string>
     <string name="manual_button">Connect manually</string>
     <string name="disconnect_button">Disconnect</string>

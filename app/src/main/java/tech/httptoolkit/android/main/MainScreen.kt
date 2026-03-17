@@ -1,7 +1,6 @@
 package tech.httptoolkit.android.main
 
 import android.content.res.Configuration
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -10,60 +9,29 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import tech.httptoolkit.android.ProxyConfig
 import tech.httptoolkit.android.R
-import tech.httptoolkit.android.connection.ConnectionStatusScreen
 import tech.httptoolkit.android.main.ConnectionState.*
 import tech.httptoolkit.android.ui.AppConstants
 import tech.httptoolkit.android.ui.DmSansFontFamily
 
-// MainScreen-specific layout constants
-private const val SCREEN_HEIGHT_SMALL = 680
-private const val SCREEN_HEIGHT_TINY = 380
-private val POST_STATUS_SPACER = 50.dp
-private val BACKGROUND_IMAGE_PADDING = 120.dp
-private const val BACKGROUND_IMAGE_ALPHA = 0.1f
-private val LETTER_SPACING_TIGHT = (-0.05).sp
-
-private fun getLogoGuidelinePercent(screenHeightDp: Int): Float = when {
-    screenHeightDp >= SCREEN_HEIGHT_SMALL -> 0.16f
-    screenHeightDp >= SCREEN_HEIGHT_TINY -> 0.08f
-    else -> 0.18f
-}
-
-private fun getStatusGuidelinePercent(screenHeightDp: Int, smallScreen: Boolean): Float {
-    val basePercent = getLogoGuidelinePercent(screenHeightDp)
-    return if (!smallScreen) 0.32f else basePercent + 0.08f
-}
-
 data class MainScreenState(
     val connectionState: ConnectionState,
     val proxyConfig: ProxyConfig?,
-    val hasCamera: Boolean,
-    val lastProxy: ProxyConfig?,
-    val totalAppCount: Int,
-    val interceptedAppCount: Int,
-    val interceptedPorts: Set<Int>
+    val lastProxy: ProxyConfig?
 )
 
 data class MainScreenActions(
-    val onScanQRCode: () -> Unit,
+    val onConnect: () -> Unit,
     val onReconnect: () -> Unit,
     val onDisconnect: () -> Unit,
-    val onRecoverAfterFailure: () -> Unit,
-    val onTestInterception: () -> Unit,
-    val onOpenDocs: () -> Unit,
-    val onChooseApps: () -> Unit,
-    val onChoosePorts: () -> Unit
+    val onRecoverAfterFailure: () -> Unit
 )
 
 @Composable
@@ -76,17 +44,9 @@ fun MainScreen(
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
     if (isLandscape) {
-        LandscapeMainScreen(
-            screenState = screenState,
-            actions = actions,
-            modifier = modifier
-        )
+        LandscapeMainScreen(screenState = screenState, actions = actions, modifier = modifier)
     } else {
-        PortraitMainScreen(
-            screenState = screenState,
-            actions = actions,
-            modifier = modifier
-        )
+        PortraitMainScreen(screenState = screenState, actions = actions, modifier = modifier)
     }
 }
 
@@ -96,78 +56,115 @@ private fun PortraitMainScreen(
     actions: MainScreenActions,
     modifier: Modifier = Modifier
 ) {
-    val configuration = LocalConfiguration.current
-    val screenHeightDp = configuration.screenHeightDp
-
-    // Determine layout mode based on screen height
-    val smallScreen = screenHeightDp < SCREEN_HEIGHT_SMALL
-    val guidelinePercent = getLogoGuidelinePercent(screenHeightDp)
-    val statusGuidelinePercent = getStatusGuidelinePercent(screenHeightDp, smallScreen)
-
-    Box(modifier = modifier.fillMaxSize()) {
-        if (smallScreen) { // On small screens, we move the logo to the background
-            Image(
-                painter = painterResource(id = R.drawable.ic_transparent_icon),
-                contentDescription = null,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(bottom = BACKGROUND_IMAGE_PADDING),
-                alpha = BACKGROUND_IMAGE_ALPHA
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(horizontal = AppConstants.spacingNormal)
+    ) {
+        Spacer(modifier = Modifier.height(32.dp))
+        Text(
+            text = stringResource(
+                when (screenState.connectionState) {
+                    DISCONNECTED -> R.string.disconnected_status
+                    CONNECTING -> R.string.connecting_status
+                    CONNECTED -> R.string.connected_status
+                    DISCONNECTING -> R.string.disconnecting_status
+                    FAILED -> R.string.failed_status
+                }
+            ),
+            fontSize = AppConstants.textSizeHeading,
+            fontFamily = DmSansFontFamily,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onBackground,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        when (screenState.connectionState) {
+            DISCONNECTED -> Text(
+                text = stringResource(R.string.disconnected_details_ludo),
+                fontSize = AppConstants.textSizeBodyLarge,
+                fontFamily = DmSansFontFamily,
+                color = MaterialTheme.colorScheme.onBackground,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
             )
+            CONNECTED -> Text(
+                text = stringResource(R.string.connected_details_ludo),
+                fontSize = AppConstants.textSizeBodyLarge,
+                fontFamily = DmSansFontFamily,
+                color = MaterialTheme.colorScheme.onBackground,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
+            )
+            FAILED -> Text(
+                text = stringResource(R.string.failed_details),
+                fontSize = AppConstants.textSizeBodyLarge,
+                fontFamily = DmSansFontFamily,
+                color = MaterialTheme.colorScheme.onBackground,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
+            )
+            else -> {}
         }
-
-        Box(modifier = Modifier.fillMaxSize()) {
-            Column(modifier = Modifier.fillMaxSize()) {
-                // Reserve space for the logo and status text positioned absolutely
-                Spacer(modifier = Modifier.height((screenHeightDp * statusGuidelinePercent).dp + POST_STATUS_SPACER))
-
-                // Scrollable detail container
-                Box(
+        Spacer(modifier = Modifier.weight(1f))
+        if (screenState.connectionState != CONNECTING && screenState.connectionState != DISCONNECTING) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(topStart = AppConstants.spacingLarge, topEnd = AppConstants.spacingLarge),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(
                     modifier = Modifier
-                        .weight(1f)
                         .fillMaxWidth()
+                        .padding(AppConstants.spacingMedium),
+                    verticalArrangement = Arrangement.spacedBy(AppConstants.spacingSmall)
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .verticalScroll(rememberScrollState())
-                            .padding(start = AppConstants.spacingNormal, end = AppConstants.spacingNormal, bottom = AppConstants.spacingTiny)
-                    ) {
-                        DetailContent(
-                            screenState = screenState,
-                            onChooseApps = actions.onChooseApps,
-                            onChoosePorts = actions.onChoosePorts
-                        )
-                    }
-                }
-
-                // Button container - only visible when not transitioning
-                if (screenState.connectionState != CONNECTING && screenState.connectionState != DISCONNECTING) {
-                    ButtonCard(
-                        isLandscape = false,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        ActionButtons(screenState = screenState, actions = actions)
+                    when (screenState.connectionState) {
+                        DISCONNECTED -> {
+                            Button(
+                                onClick = actions.onConnect,
+                                modifier = Modifier.fillMaxWidth().height(AppConstants.buttonHeight),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary,
+                                    contentColor = MaterialTheme.colorScheme.onPrimary
+                                )
+                            ) {
+                                Text(stringResource(R.string.connect_button), fontFamily = DmSansFontFamily, fontWeight = FontWeight.Bold)
+                            }
+                            if (screenState.lastProxy != null) {
+                                OutlinedButton(
+                                    onClick = actions.onReconnect,
+                                    modifier = Modifier.fillMaxWidth().height(AppConstants.buttonHeight)
+                                ) {
+                                    Text(stringResource(R.string.reconnect_button), fontFamily = DmSansFontFamily)
+                                }
+                            }
+                        }
+                        CONNECTED -> Button(
+                            onClick = actions.onDisconnect,
+                            modifier = Modifier.fillMaxWidth().height(AppConstants.buttonHeight),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary
+                            )
+                        ) {
+                            Text(stringResource(R.string.disconnect_button), fontFamily = DmSansFontFamily, fontWeight = FontWeight.Bold)
+                        }
+                        FAILED -> Button(
+                            onClick = actions.onRecoverAfterFailure,
+                            modifier = Modifier.fillMaxWidth().height(AppConstants.buttonHeight),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary
+                            )
+                        ) {
+                            Text(stringResource(R.string.try_again_button), fontFamily = DmSansFontFamily, fontWeight = FontWeight.Bold)
+                        }
+                        else -> {}
                     }
                 }
             }
-
-            if (!smallScreen) {
-                Image(
-                    painter = painterResource(id = R.drawable.ic_transparent_icon),
-                    contentDescription = "The HTTP Toolkit Logo",
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .offset(y = (screenHeightDp * guidelinePercent).dp)
-                )
-            }
-
-            StatusText(
-                connectionState = screenState.connectionState,
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .offset(y = (screenHeightDp * statusGuidelinePercent).dp)
-            )
         }
     }
 }
@@ -178,316 +175,66 @@ private fun LandscapeMainScreen(
     actions: MainScreenActions,
     modifier: Modifier = Modifier
 ) {
-    Row(
-        modifier = modifier.fillMaxSize()
-    ) {
-        // Left side: Status and details
+    Row(modifier = modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
-                .weight(1.1f)
+                .weight(1f)
                 .fillMaxHeight()
-                .windowInsetsPadding(WindowInsets.systemBars.only(WindowInsetsSides.Start + WindowInsetsSides.Top + WindowInsetsSides.Bottom)),
+                .padding(AppConstants.spacingLarge),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            // Status text
-            StatusText(connectionState = screenState.connectionState)
-
-            // Detail container
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
-                    .padding(start = AppConstants.spacingLarge, end = AppConstants.spacingLarge, bottom = AppConstants.spacingTiny)
-            ) {
-                DetailContent(
-                    screenState = screenState,
-                    onChooseApps = actions.onChooseApps,
-                    onChoosePorts = actions.onChoosePorts
-                )
+            Text(
+                text = stringResource(
+                    when (screenState.connectionState) {
+                        DISCONNECTED -> R.string.disconnected_status
+                        CONNECTING -> R.string.connecting_status
+                        CONNECTED -> R.string.connected_status
+                        DISCONNECTING -> R.string.disconnecting_status
+                        FAILED -> R.string.failed_status
+                    }
+                ),
+                fontSize = AppConstants.textSizeHeading,
+                fontFamily = DmSansFontFamily,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onBackground
+            )
+            when (screenState.connectionState) {
+                DISCONNECTED -> Text(stringResource(R.string.disconnected_details_ludo), fontFamily = DmSansFontFamily, color = MaterialTheme.colorScheme.onBackground)
+                CONNECTED -> Text(stringResource(R.string.connected_details_ludo), fontFamily = DmSansFontFamily, color = MaterialTheme.colorScheme.onBackground)
+                FAILED -> Text(stringResource(R.string.failed_details), fontFamily = DmSansFontFamily, color = MaterialTheme.colorScheme.onBackground)
+                else -> {}
             }
         }
-
         Column(
             modifier = Modifier
-                .weight(1.1f)
+                .weight(1f)
                 .fillMaxHeight()
-                .windowInsetsPadding(WindowInsets.systemBars.only(WindowInsetsSides.End + WindowInsetsSides.Top + WindowInsetsSides.Bottom)),
+                .padding(AppConstants.spacingLarge),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            Image(
-                painter = painterResource(id = R.drawable.ic_transparent_icon),
-                contentDescription = "The HTTP Toolkit Logo",
-                modifier = Modifier
-                    .weight(1f, fill = false)
-                    .wrapContentSize()
-                    .padding(bottom = AppConstants.spacingLarge)
-            )
-
             if (screenState.connectionState != CONNECTING && screenState.connectionState != DISCONNECTING) {
-                ButtonCard(
-                    isLandscape = true,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    ActionButtons(screenState = screenState, actions = actions)
+                when (screenState.connectionState) {
+                    DISCONNECTED -> {
+                        Button(onClick = actions.onConnect, modifier = Modifier.fillMaxWidth()) {
+                            Text(stringResource(R.string.connect_button), fontFamily = DmSansFontFamily)
+                        }
+                        if (screenState.lastProxy != null) {
+                            OutlinedButton(onClick = actions.onReconnect, modifier = Modifier.fillMaxWidth()) {
+                                Text(stringResource(R.string.reconnect_button), fontFamily = DmSansFontFamily)
+                            }
+                        }
+                    }
+                    CONNECTED -> Button(onClick = actions.onDisconnect, modifier = Modifier.fillMaxWidth()) {
+                        Text(stringResource(R.string.disconnect_button), fontFamily = DmSansFontFamily)
+                    }
+                    FAILED -> Button(onClick = actions.onRecoverAfterFailure, modifier = Modifier.fillMaxWidth()) {
+                        Text(stringResource(R.string.try_again_button), fontFamily = DmSansFontFamily)
+                    }
+                    else -> {}
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun StatusText(
-    connectionState: ConnectionState,
-    modifier: Modifier = Modifier
-) {
-    Text(
-        text = stringResource(
-            when (connectionState) {
-                DISCONNECTED -> R.string.disconnected_status
-                CONNECTING -> R.string.connecting_status
-                CONNECTED -> R.string.connected_status
-                DISCONNECTING -> R.string.disconnecting_status
-                FAILED -> R.string.failed_status
-            }
-        ),
-        fontSize = AppConstants.textSizeHeading,
-        fontFamily = DmSansFontFamily,
-        fontWeight = FontWeight.Bold,
-        letterSpacing = LETTER_SPACING_TIGHT,
-        color = MaterialTheme.colorScheme.onBackground,
-        textAlign = TextAlign.Center,
-        modifier = modifier.padding(horizontal = AppConstants.spacingSmall)
-    )
-}
-
-@Composable
-private fun DetailContent(
-    screenState: MainScreenState,
-    onChooseApps: () -> Unit,
-    onChoosePorts: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    when (screenState.connectionState) {
-        DISCONNECTED -> {
-            if (screenState.hasCamera) {
-                DetailText(
-                    text = stringResource(R.string.disconnected_details),
-                    modifier = modifier.padding(top = AppConstants.spacingLarge)
-                )
-            } else {
-                DetailText(
-                    text = stringResource(R.string.disconnected_no_camera_details),
-                    modifier = modifier.padding(top = AppConstants.spacingLarge)
-                )
-            }
-        }
-
-        CONNECTED -> {
-            if (screenState.proxyConfig != null) {
-                ConnectionStatusScreen(
-                    proxyConfig = screenState.proxyConfig,
-                    totalAppCount = screenState.totalAppCount,
-                    interceptedAppCount = screenState.interceptedAppCount,
-                    onChangeApps = onChooseApps,
-                    interceptedPorts = screenState.interceptedPorts,
-                    onChangePorts = onChoosePorts,
-                    modifier = modifier
-                )
-            }
-        }
-
-        FAILED -> {
-            DetailText(
-                text = stringResource(R.string.failed_details),
-                modifier = modifier.padding(top = AppConstants.spacingLarge)
-            )
-        }
-
-        CONNECTING, DISCONNECTING -> {
-            // No details shown during these states
-        }
-    }
-}
-
-@Composable
-private fun ActionButtons(
-    screenState: MainScreenState,
-    actions: MainScreenActions
-) {
-    when (screenState.connectionState) {
-        DISCONNECTED -> {
-            if (screenState.hasCamera) {
-                PrimaryButton(
-                    text = stringResource(R.string.scan_button),
-                    onClick = actions.onScanQRCode
-                )
-            }
-            if (screenState.lastProxy != null) {
-                SecondaryButton(
-                    text = stringResource(R.string.reconnect_button),
-                    onClick = actions.onReconnect
-                )
-            }
-        }
-
-        CONNECTED -> {
-            PrimaryButton(
-                text = stringResource(R.string.disconnect_button),
-                onClick = actions.onDisconnect
-            )
-            SecondaryButton(
-                text = stringResource(R.string.test_button),
-                onClick = actions.onTestInterception
-            )
-        }
-
-        FAILED -> {
-            PrimaryButton(
-                text = stringResource(R.string.try_again_button),
-                onClick = actions.onRecoverAfterFailure
-            )
-        }
-
-        else -> {}
-    }
-
-    // Docs button always shown
-    SecondaryButton(
-        text = stringResource(R.string.docs_button),
-        onClick = actions.onOpenDocs
-    )
-}
-
-@Composable
-private fun DetailText(
-    text: String,
-    modifier: Modifier = Modifier
-) {
-    Text(
-        text = text,
-        fontSize = AppConstants.textSizeBodyLarge,
-        fontFamily = DmSansFontFamily,
-        fontWeight = FontWeight.Normal,
-        color = MaterialTheme.colorScheme.onBackground,
-        textAlign = TextAlign.Center,
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = AppConstants.spacingLarge, vertical = 0.dp)
-    )
-}
-
-@Composable
-private fun ButtonCard(
-    isLandscape: Boolean,
-    modifier: Modifier = Modifier,
-    content: @Composable ColumnScope.() -> Unit
-) {
-    val shape: Shape
-    val contentPadding: PaddingValues
-
-    if (isLandscape) {
-        // Landscape: rounded corners all around, with margins
-        shape = MaterialTheme.shapes.small
-        contentPadding = PaddingValues(
-            start = AppConstants.spacingNormal,
-            end = AppConstants.spacingNormal,
-            top = AppConstants.spacingNormal,
-            bottom = AppConstants.spacingNormal
-        )
-    } else {
-        // Portrait: rounded top corners only, extends to screen edges
-        shape = RoundedCornerShape(
-            topStart = AppConstants.spacingLarge,
-            topEnd = AppConstants.spacingLarge,
-            bottomEnd = 0.dp,
-            bottomStart = 0.dp
-        )
-        // Content padding includes bottom inset padding, card extends to edge
-        contentPadding = PaddingValues(
-            start = AppConstants.spacingMedium,
-            end = AppConstants.spacingMedium,
-            top = AppConstants.spacingMedium,
-            bottom = AppConstants.spacingSmall
-        )
-    }
-
-    Card(
-        modifier = modifier.padding(horizontal = AppConstants.spacingMedium),
-        shape = shape,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = AppConstants.elevationDefault)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .then(
-                    if (!isLandscape) {
-                        Modifier.windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom))
-                    } else {
-                        Modifier
-                    }
-                )
-                .padding(contentPadding),
-            verticalArrangement = Arrangement.spacedBy(AppConstants.spacingSmall),
-            content = content
-        )
-    }
-}
-
-@Composable
-private fun PrimaryButton(
-    text: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Button(
-        onClick = onClick,
-        modifier = modifier
-            .fillMaxWidth()
-            .height(AppConstants.buttonHeight),
-        colors = ButtonDefaults.buttonColors(
-            containerColor = MaterialTheme.colorScheme.primary,
-            contentColor = MaterialTheme.colorScheme.onPrimary
-        ),
-        shape = MaterialTheme.shapes.small
-    ) {
-        Text(
-            text = text,
-            fontSize = AppConstants.textSizeBodyLarge,
-            fontFamily = DmSansFontFamily,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = AppConstants.letterSpacingNone
-        )
-    }
-}
-
-@Composable
-private fun SecondaryButton(
-    text: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    OutlinedButton(
-        onClick = onClick,
-        modifier = modifier
-            .fillMaxWidth()
-            .height(AppConstants.buttonHeight),
-        colors = ButtonDefaults.outlinedButtonColors(
-            contentColor = MaterialTheme.colorScheme.onBackground
-        ),
-        border = ButtonDefaults.outlinedButtonBorder(enabled = true).copy(width = 1.dp),
-        shape = MaterialTheme.shapes.small
-    ) {
-        Text(
-            text = text,
-            fontSize = AppConstants.textSizeBodyLarge,
-            fontFamily = DmSansFontFamily,
-            fontWeight = FontWeight.Normal,
-            letterSpacing = AppConstants.letterSpacingNone
-        )
     }
 }

@@ -12,6 +12,9 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import io.sentry.Sentry
+import tech.httptoolkit.android.ca.generateOrLoad
+import tech.httptoolkit.android.intercept.LocalMitmProxy
+import tech.httptoolkit.android.intercept.LudoInterceptorConfig
 import tech.httptoolkit.android.main.MainActivity
 import tech.httptoolkit.android.vpn.socket.IProtectSocket
 import tech.httptoolkit.android.vpn.socket.SocketProtector
@@ -52,6 +55,8 @@ class ProxyVpnService : VpnService(), IProtectSocket {
 
     private var vpnInterface: ParcelFileDescriptor? = null
     private var vpnRunnable: ProxyVpnRunnable? = null
+    private var mitmProxy: LocalMitmProxy? = null
+    private var mitmProxyThread: Thread? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -74,14 +79,15 @@ class ProxyVpnService : VpnService(), IProtectSocket {
         app = this.application as HttpToolkitApplication
 
         if (intent.action == START_VPN_ACTION) {
-            val proxyConfig = intent.getParcelableExtra<ProxyConfig>(IntentExtras.PROXY_CONFIG_EXTRA)!!
-            val uninterceptedApps = intent.getStringArrayExtra(IntentExtras.UNINTERCEPTED_APPS_EXTRA)!!.toSet()
-            val interceptedPorts = intent.getIntArrayExtra(IntentExtras.INTERCEPTED_PORTS_EXTRA)!!.toSet()
+            val proxyConfig = intent.getParcelableExtra<ProxyConfig>(IntentExtras.PROXY_CONFIG_EXTRA)
+                ?: return Service.START_NOT_STICKY
+            val interceptedPorts = intent.getIntArrayExtra(IntentExtras.INTERCEPTED_PORTS_EXTRA)?.toSet()
+                ?: setOf(443)
 
             val vpnStarted = if (isActive())
-                restartVpn(proxyConfig, uninterceptedApps, interceptedPorts)
+                restartVpn(proxyConfig, interceptedPorts)
             else
-                startVpn(proxyConfig, uninterceptedApps, interceptedPorts)
+                startVpn(proxyConfig, interceptedPorts)
 
             if (vpnStarted) {
                 // If the system briefly kills us for some reason (memory, the user, whatever) whilst
@@ -147,82 +153,41 @@ class ProxyVpnService : VpnService(), IProtectSocket {
 
     private fun startVpn(
         proxyConfig: ProxyConfig,
-        uninterceptedApps: Set<String>,
         interceptedPorts: Set<Int>
     ): Boolean {
         this.proxyConfig = proxyConfig
-        val packages = packageManager.getInstalledApplications(PackageManager.GET_META_DATA)
-
-        val allPackageNames = packages.map { pkg -> pkg.packageName }
-        val isGenymotion = allPackageNames.any {
-            // This check could be stricter (com.genymotion.genyd), but right now it doesn't seem to
-            // have any false positives, and it's very flexible to changes in genymotion itself.
-            name -> name.startsWith("com.genymotion")
-        }
-
         if (this.vpnInterface != null) return false // Already running, do nothing
+
+        // Ensure local CA is loaded and start the MITM proxy so the port is bound before VPN redirects traffic
+        val ca = try {
+            generateOrLoad(applicationContext)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to load CA for MITM proxy", e)
+            return false
+        }
+        mitmProxy = LocalMitmProxy(ca).also { proxy ->
+            mitmProxyThread = Thread(proxy, "LocalMitmProxy").also { it.start() }
+        }
 
         val vpnInterface = Builder()
             .addAddress(VPN_IP_ADDRESS, 32)
             .addRoute(ALL_ROUTES, 0)
             .apply {
-                // On Android 10+ VPNs are assumed as metered by default, unless we explicitly
-                // specify otherwise:
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     setMetered(false)
                 }
             }
-            .setMtu(MAX_PACKET_LEN) // Limit the packet size to the buffer used by ProxyVpnRunnable
-            .setBlocking(true) // We use a blocking loop to read in ProxyVpnRunnable
+            .setMtu(MAX_PACKET_LEN)
+            .setBlocking(true)
             .apply {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    // Where possible, we want to explicitly set the proxy in addition to
-                    // manually redirecting traffic. This is useful because it captures HTTP sent
-                    // to non-default ports. We still need to do both though, as not all clients
-                    // will use the proxy settings.
                     setHttpProxy(ProxyInfo.buildDirectProxy(proxyConfig.ip, proxyConfig.port))
                 }
             }
             .apply {
-                // We exclude ourselves from interception, so we can still make network requests
-                // separately, primarily because otherwise pinging with isReachable is recursive.
-                val httpToolkitPackage = packageName
-
-                when {
-                    isGenymotion -> {
-                        // For some reason, with Genymotion the whole device crashes if we intercept
-                        // the whole system, so we have to ensure we *always* explicitly allow
-                        // every app that we care about.
-
-                        val pkgsToIntercept = allPackageNames.filter { name ->
-                            name != httpToolkitPackage && !uninterceptedApps.contains(name)
-                        }
-
-                        if (!pkgsToIntercept.isEmpty()) {
-                            pkgsToIntercept.forEach { pkg -> addAllowedApplication(pkg) }
-                        } else {
-                            // We can never intercept nothing (or the whole emulator crashes), so
-                            // instead we intercept a random bit of Genymotions internals, which
-                            // (AFAICT) doesn't seem to ever send traffic.
-                            addAllowedApplication("com.genymotion.genyd")
-                        }
-                    }
-                    else -> {
-                        // In every other case, it's better to list the disallowed apps, rather than
-                        // adding only the intercepted apps, because that ensures new apps that are
-                        // installed whilst interception is active get intercepted straight away
-
-                        // Don't intercept them explicitly disallowed packages:
-                        uninterceptedApps
-                            .filter { app -> allPackageNames.contains(app) }
-                            .forEach { name ->
-                                addDisallowedApplication(name)
-                            }
-
-                        // Never intercept HTTP Toolkit (as above - doing so causes problems)
-                        addDisallowedApplication(httpToolkitPackage)
-                    }
-                }
+                // Intercept only Ludoking; never intercept ourselves
+                addAllowedApplication(LudoInterceptorConfig.TARGET_PACKAGE)
+                addDisallowedApplication(packageName)
             }
             .setSession(getString(R.string.app_name))
             .establish()
@@ -260,10 +225,13 @@ class ProxyVpnService : VpnService(), IProtectSocket {
 
     private fun restartVpn(
         proxyConfig: ProxyConfig,
-        uninterceptedApps: Set<String>,
         interceptedPorts: Set<Int>
     ): Boolean {
         Log.i(TAG, "VPN stopping for restart...")
+
+        mitmProxy?.stop()
+        mitmProxy = null
+        mitmProxyThread = null
 
         if (vpnRunnable != null) {
             vpnRunnable!!.stop()
@@ -278,11 +246,15 @@ class ProxyVpnService : VpnService(), IProtectSocket {
         }
 
         stopForeground(true)
-        return startVpn(proxyConfig, uninterceptedApps, interceptedPorts)
+        return startVpn(proxyConfig, interceptedPorts)
     }
 
     private fun stopVpn() {
         Log.i(TAG, "VPN stopping...")
+
+        mitmProxy?.stop()
+        mitmProxy = null
+        mitmProxyThread = null
 
         if (vpnRunnable != null) {
             vpnRunnable!!.stop()
