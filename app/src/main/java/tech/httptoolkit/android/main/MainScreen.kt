@@ -271,17 +271,10 @@ private fun DetailContent(
 ) {
     when (screenState.connectionState) {
         DISCONNECTED -> {
-            if (screenState.hasCamera) {
-                DetailText(
-                    text = stringResource(R.string.disconnected_details),
-                    modifier = modifier.padding(top = AppConstants.spacingLarge)
-                )
-            } else {
-                DetailText(
-                    text = stringResource(R.string.disconnected_no_camera_details),
-                    modifier = modifier.padding(top = AppConstants.spacingLarge)
-                )
-            }
+            DetailText(
+                text = "Ready to connect. VPN will route traffic through local proxy.",
+                modifier = modifier.padding(top = AppConstants.spacingLarge)
+            )
         }
 
         CONNECTED -> {
@@ -318,12 +311,7 @@ private fun ActionButtons(
 ) {
     when (screenState.connectionState) {
         DISCONNECTED -> {
-            if (screenState.hasCamera) {
-                PrimaryButton(
-                    text = stringResource(R.string.scan_button),
-                    onClick = actions.onScanQRCode
-                )
-            }
+            // QR code scanning removed - API key input is shown separately
             if (screenState.lastProxy != null) {
                 SecondaryButton(
                     text = stringResource(R.string.reconnect_button),

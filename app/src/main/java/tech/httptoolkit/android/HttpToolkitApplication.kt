@@ -33,6 +33,8 @@ private const val APP_CRASHED_PREF = "app-crashed"
 private const val FIRST_RUN_PREF = "is-first-run"
 private const val HTTP_TOOLKIT_PREFERENCES_NAME = "tech.httptoolkit.android"
 private const val LAST_PROXY_CONFIG_PREF_KEY = "last-proxy-config"
+private const val API_KEY_PREF_KEY = "api-key"
+private const val BACKEND_URL_PREF_KEY = "backend-url"
 private const val TIME_PATTERN = "yyyy-MM-dd'T'HH:mm:ss"
 
 private val isProbablyEmulator =
@@ -208,6 +210,30 @@ class HttpToolkitApplication : Application() {
         set(ports) {
             val prefs = getSharedPreferences(HTTP_TOOLKIT_PREFERENCES_NAME, MODE_PRIVATE)
             prefs.edit { putStringSet("intercepted-ports", ports.map(Int::toString).toSet()) }
+        }
+
+    var apiKey: String?
+        get() {
+            val prefs = getSharedPreferences(HTTP_TOOLKIT_PREFERENCES_NAME, MODE_PRIVATE)
+            return prefs.getString(API_KEY_PREF_KEY, null)
+        }
+        set(key) {
+            val prefs = getSharedPreferences(HTTP_TOOLKIT_PREFERENCES_NAME, MODE_PRIVATE)
+            if (key != null) {
+                prefs.edit { putString(API_KEY_PREF_KEY, key) }
+            } else {
+                prefs.edit { remove(API_KEY_PREF_KEY) }
+            }
+        }
+
+    var backendUrl: String
+        get() {
+            val prefs = getSharedPreferences(HTTP_TOOLKIT_PREFERENCES_NAME, MODE_PRIVATE)
+            return prefs.getString(BACKEND_URL_PREF_KEY, Constants.BACKEND_BASE_URL) ?: Constants.BACKEND_BASE_URL
+        }
+        set(url) {
+            val prefs = getSharedPreferences(HTTP_TOOLKIT_PREFERENCES_NAME, MODE_PRIVATE)
+            prefs.edit { putString(BACKEND_URL_PREF_KEY, url) }
         }
 
     suspend fun isUpdateRequired(): Boolean {

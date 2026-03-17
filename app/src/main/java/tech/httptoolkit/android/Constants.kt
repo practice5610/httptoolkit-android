@@ -11,4 +11,19 @@ object IntentExtras {
 
 object Constants {
     const val QR_CODE_URL_PREFIX = "https://android.httptoolkit.tech/connect/"
+    
+    // Backend API configuration
+    const val BACKEND_BASE_URL = "http://192.168.10.2:5000" // Default, can be overridden via SharedPreferences
+    const val BACKEND_API_V1 = "$BACKEND_BASE_URL/api/v1"
+    
+    // Ludoking game configuration
+    const val LUDOKING_PACKAGE_NAME = "com.ludo.king"
+    const val LUDOKING_PROFILE_API_URL = "https://misc-services.ludokingapi.com/api/v3/player/profile"
+    
+    // PWA configuration
+    const val PWA_URL = "https://justtapit.co/"
+    
+    // Local proxy server configuration
+    const val LOCAL_PROXY_PORT = 8000
+    const val LOCAL_PROXY_HOST = "127.0.0.1"
 }

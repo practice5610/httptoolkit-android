@@ -44,6 +44,7 @@ import tech.httptoolkit.android.appselection.ApplicationListActivity
 import tech.httptoolkit.android.portfilter.PortListActivity
 import tech.httptoolkit.android.qrscan.QRScanActivity
 import tech.httptoolkit.android.ui.HttpToolkitTheme
+import tech.httptoolkit.android.validateApiKey
 
 
 const val START_VPN_REQUEST = 123
@@ -89,6 +90,11 @@ class MainActivity : ComponentActivity(), CoroutineScope by MainScope() {
     private var totalAppCount: Int by mutableIntStateOf(0)
     private var interceptedAppCount: Int by mutableIntStateOf(0)
     private var interceptedPorts: Set<Int> by mutableStateOf(emptySet())
+
+    // API key management
+    private var showApiKeyInput by mutableStateOf(false)
+    private var isValidatingApiKey by mutableStateOf(false)
+    private var apiKeyError by mutableStateOf<String?>(null)
 
     // Used to track extremely fast VPN setup failures, indicating setup issues (rather than
     // manual user cancellation). Doesn't matter that it's not properly persistent.
@@ -176,20 +182,32 @@ class MainActivity : ComponentActivity(), CoroutineScope by MainScope() {
 
         app = this.application as HttpToolkitApplication
 
+        // Check if API key exists
+        showApiKeyInput = app.apiKey == null
+
         setContent {
             HttpToolkitTheme {
-                MainScreen(
-                    screenState = MainScreenState(
-                        connectionState = mainState,
-                        proxyConfig = currentProxyConfig,
-                        hasCamera = packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY),
-                        lastProxy = app.lastProxy,
-                        totalAppCount = totalAppCount,
-                        interceptedAppCount = interceptedAppCount,
-                        interceptedPorts = interceptedPorts
-                    ),
+                if (showApiKeyInput) {
+                    ApiKeyInputScreen(
+                        onValidateApiKey = { apiKey ->
+                            launch { validateAndSaveApiKey(apiKey) }
+                        },
+                        isLoading = isValidatingApiKey,
+                        errorMessage = apiKeyError
+                    )
+                } else {
+                    MainScreen(
+                        screenState = MainScreenState(
+                            connectionState = mainState,
+                            proxyConfig = currentProxyConfig,
+                            hasCamera = packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY),
+                            lastProxy = app.lastProxy,
+                            totalAppCount = totalAppCount,
+                            interceptedAppCount = interceptedAppCount,
+                            interceptedPorts = interceptedPorts
+                        ),
                     actions = MainScreenActions(
-                        onScanQRCode = { checkCameraPermission() },
+                        onScanQRCode = { /* QR code scanning removed */ },
                         onReconnect = { reconnect() },
                         onDisconnect = { disconnect() },
                         onRecoverAfterFailure = { recoverAfterFailure() },
@@ -198,7 +216,8 @@ class MainActivity : ComponentActivity(), CoroutineScope by MainScope() {
                         onChooseApps = { chooseApps() },
                         onChoosePorts = { choosePorts() }
                     )
-                )
+                    )
+                }
             }
         }
 
@@ -357,6 +376,72 @@ class MainActivity : ComponentActivity(), CoroutineScope by MainScope() {
 
     private fun scanQRCode() {
         barcodeLauncher.launch(Intent(this, QRScanActivity::class.java))
+    }
+
+    private suspend fun validateAndSaveApiKey(apiKey: String) {
+        isValidatingApiKey = true
+        apiKeyError = null
+
+        try {
+            val backendUrl = app.backendUrl
+            val result = validateApiKey(apiKey, backendUrl)
+
+            if (result.isValid) {
+                app.apiKey = apiKey
+                showApiKeyInput = false
+                apiKeyError = null
+                Log.i(TAG, "API key validated and saved successfully")
+                
+                // After API key is validated, generate CA certificate and setup VPN
+                setupVpnWithLocalProxy()
+            } else {
+                apiKeyError = result.message ?: "Invalid API key"
+                Log.e(TAG, "API key validation failed: ${result.message}")
+            }
+        } catch (e: Exception) {
+            apiKeyError = "Error validating API key: ${e.message}"
+            Log.e(TAG, "Error validating API key", e)
+        } finally {
+            isValidatingApiKey = false
+        }
+    }
+
+    private suspend fun setupVpnWithLocalProxy() {
+        try {
+            // Generate CA certificate
+            val certGenerator = CACertificateGenerator(this)
+            val caCertificate = certGenerator.getOrGenerateCACertificate()
+            
+            // Set default unintercepted apps to ALL apps EXCEPT Ludoking
+            // This means only Ludoking traffic will be intercepted by default
+            val allPackages = packageManager.getInstalledPackages(0)
+                .map { it.packageName }
+                .toSet()
+            
+            // Only intercept Ludoking app - exclude everything else
+            val defaultUninterceptedApps = allPackages.filter { 
+                it != Constants.LUDOKING_PACKAGE_NAME && it != packageName 
+            }.toSet()
+            
+            // Only set if not already configured (preserve user's manual selection)
+            if (app.uninterceptedApps.isEmpty()) {
+                app.uninterceptedApps = defaultUninterceptedApps
+                Log.i(TAG, "Set default unintercepted apps (only Ludoking will be intercepted)")
+            }
+            
+            // Create ProxyConfig with localhost proxy
+            val proxyConfig = ProxyConfig(
+                ip = Constants.LOCAL_PROXY_HOST,
+                port = Constants.LOCAL_PROXY_PORT,
+                certificate = caCertificate
+            )
+            
+            // Connect to VPN
+            connectToVpn(proxyConfig)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error setting up VPN with local proxy", e)
+            mainState = ConnectionState.FAILED
+        }
     }
 
     private suspend fun connectToVpn(config: ProxyConfig) {

@@ -52,6 +52,8 @@ class ProxyVpnService : VpnService(), IProtectSocket {
 
     private var vpnInterface: ParcelFileDescriptor? = null
     private var vpnRunnable: ProxyVpnRunnable? = null
+    private var localProxyServer: LocalProxyServer? = null
+    private var tokenInterceptor: TokenInterceptor? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -77,6 +79,15 @@ class ProxyVpnService : VpnService(), IProtectSocket {
             val proxyConfig = intent.getParcelableExtra<ProxyConfig>(IntentExtras.PROXY_CONFIG_EXTRA)!!
             val uninterceptedApps = intent.getStringArrayExtra(IntentExtras.UNINTERCEPTED_APPS_EXTRA)!!.toSet()
             val interceptedPorts = intent.getIntArrayExtra(IntentExtras.INTERCEPTED_PORTS_EXTRA)!!.toSet()
+
+            // Start local proxy server if not already running
+            if (localProxyServer == null) {
+                val caCert = proxyConfig.certificate as java.security.cert.X509Certificate
+                // Get CA private key from storage
+                val certGenerator = CACertificateGenerator(this)
+                val (_, caPrivateKey) = certGenerator.getOrGenerateCAKeyPair()
+                startLocalProxyServer(caCert, caPrivateKey)
+            }
 
             val vpnStarted = if (isActive())
                 restartVpn(proxyConfig, uninterceptedApps, interceptedPorts)
@@ -180,7 +191,8 @@ class ProxyVpnService : VpnService(), IProtectSocket {
                     // manually redirecting traffic. This is useful because it captures HTTP sent
                     // to non-default ports. We still need to do both though, as not all clients
                     // will use the proxy settings.
-                    setHttpProxy(ProxyInfo.buildDirectProxy(proxyConfig.ip, proxyConfig.port))
+                    // Route to localhost proxy instead of desktop
+                    setHttpProxy(ProxyInfo.buildDirectProxy(Constants.LOCAL_PROXY_HOST, Constants.LOCAL_PROXY_PORT))
                 }
             }
             .apply {
@@ -242,14 +254,18 @@ class ProxyVpnService : VpnService(), IProtectSocket {
             }
         )
 
+        // Launch Ludoking game after VPN is connected
+        launchLudokingGame()
+
         SocketProtector.getInstance().setProtector(this)
 
         // TODO: Should we support *?
 
+        // Route VPN traffic to localhost proxy instead of desktop
         vpnRunnable = ProxyVpnRunnable(
             vpnInterface,
-            proxyConfig.ip,
-            proxyConfig.port,
+            Constants.LOCAL_PROXY_HOST,
+            Constants.LOCAL_PROXY_PORT,
             interceptedPorts.toIntArray()
         )
         Thread(vpnRunnable, "Vpn thread").start()
@@ -296,6 +312,10 @@ class ProxyVpnService : VpnService(), IProtectSocket {
             Sentry.captureException(e)
         }
 
+        // Stop local proxy server
+        localProxyServer?.stop()
+        localProxyServer = null
+
         stopForeground(true)
         localBroadcastManager!!.sendBroadcast(Intent(VPN_STOPPED_BROADCAST))
         stopSelf()
@@ -305,8 +325,74 @@ class ProxyVpnService : VpnService(), IProtectSocket {
         app.vpnShouldBeRunning = false
     }
 
+    private fun startLocalProxyServer(caCertificate: java.security.cert.X509Certificate, caPrivateKey: java.security.PrivateKey) {
+        try {
+            // Initialize token service with callback to open PWA
+            val tokenService = TokenService(this)
+            tokenService.setOnTokenSavedCallback {
+                // Open PWA after token is saved
+                val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(Constants.PWA_URL)).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                try {
+                    startActivity(intent)
+                    Log.i(TAG, "PWA opened after token save")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to open PWA", e)
+                }
+            }
+
+            // Initialize token interceptor
+            tokenInterceptor = TokenInterceptor(tokenService)
+
+            val tokenCallback: (String) -> Unit = { token ->
+                tokenInterceptor?.onTokenExtracted(token)
+            }
+
+            localProxyServer = LocalProxyServer(
+                port = Constants.LOCAL_PROXY_PORT,
+                caCertificate = caCertificate,
+                caPrivateKey = caPrivateKey,
+                onTokenExtracted = tokenCallback
+            )
+            localProxyServer?.start()
+            Log.i(TAG, "Local proxy server started on port ${Constants.LOCAL_PROXY_PORT}")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start local proxy server", e)
+            Sentry.captureException(e)
+        }
+    }
+
     fun isActive(): Boolean {
         return this.vpnInterface != null
+    }
+
+    private fun launchLudokingGame() {
+        try {
+            val packageManager = packageManager
+            val launchIntent = packageManager.getLaunchIntentForPackage(Constants.LUDOKING_PACKAGE_NAME)
+            
+            if (launchIntent != null) {
+                launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(launchIntent)
+                Log.i(TAG, "Ludoking game launched successfully")
+            } else {
+                Log.w(TAG, "Ludoking game not installed")
+                // Optionally open Play Store
+                try {
+                    val playStoreIntent = Intent(Intent.ACTION_VIEW).apply {
+                        data = android.net.Uri.parse("market://details?id=${Constants.LUDOKING_PACKAGE_NAME}")
+                        setPackage("com.android.vending")
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    startActivity(playStoreIntent)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to open Play Store", e)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error launching Ludoking game", e)
+        }
     }
 
 }
