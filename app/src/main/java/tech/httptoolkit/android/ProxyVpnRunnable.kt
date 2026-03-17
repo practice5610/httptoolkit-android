@@ -7,13 +7,11 @@ import tech.httptoolkit.android.vpn.ClientPacketWriter
 import tech.httptoolkit.android.vpn.SessionHandler
 import tech.httptoolkit.android.vpn.SessionManager
 import tech.httptoolkit.android.vpn.socket.SocketNIODataService
-import io.sentry.Sentry
 import tech.httptoolkit.android.vpn.transport.PacketHeaderException
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.InterruptedIOException
 import java.net.ConnectException
-import java.net.InetSocketAddress
 import java.nio.ByteBuffer
 
 // Set on our VPN as the MTU, which should guarantee all packets fit this
@@ -21,9 +19,8 @@ const val MAX_PACKET_LEN = 1500
 
 class ProxyVpnRunnable(
     vpnInterface: ParcelFileDescriptor,
-    proxyHost: String,
-    proxyPort: Int,
-    redirectPorts: IntArray
+    redirectPorts: IntArray,
+    private val packetObserver: ((ByteArray, Int) -> Unit)? = null
 ) : Runnable {
 
     @Volatile private var running = false
@@ -47,12 +44,7 @@ class ProxyVpnRunnable(
     private val packet = ByteBuffer.allocate(MAX_PACKET_LEN)
 
     // Our redirect rules, defining which traffic should be forwarded to what proxy address
-    private val portRedirections = SparseArray<InetSocketAddress>().apply {
-        val proxyAddress = InetSocketAddress(proxyHost, proxyPort)
-        redirectPorts.forEach {
-            append(it, proxyAddress)
-        }
-    }
+    private val portRedirections = SparseArray<java.net.InetSocketAddress>()
 
     override fun run() {
         if (running) {
@@ -76,6 +68,7 @@ class ProxyVpnRunnable(
 
                 length = vpnReadStream.read(data)
                 if (length > 0) {
+                    packetObserver?.invoke(data, length)
                     try {
                         packet.limit(length)
                         handler.handlePacket(packet)
@@ -94,9 +87,7 @@ class ProxyVpnRunnable(
                             // IPv6 is not supported here yet:
                             (e is PacketHeaderException && errorMessage.contains("IP version should be 4 but was 6"))
 
-                        if (!isIgnorable) {
-                            Sentry.captureException(e)
-                        }
+                        if (!isIgnorable) Log.e(TAG, "Unhandled VPN exception", e)
                     }
 
                     packet.clear()
