@@ -4,40 +4,34 @@ import android.Manifest
 import android.app.KeyguardManager
 import android.app.NotificationManager
 import android.content.*
-import android.content.pm.PackageManager
 import android.content.pm.PackageManager.PERMISSION_GRANTED
 import android.net.Uri
 import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
-import android.os.ParcelFileDescriptor
 import android.os.PowerManager
-import android.provider.MediaStore
 import android.provider.Settings
 import android.text.Html
 import android.util.Log
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.annotation.MainThread
 import androidx.annotation.RequiresApi
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.ContextCompat.getSystemService
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
-import io.sentry.Sentry
 import kotlinx.coroutines.*
 import java.security.cert.Certificate
 import java.security.cert.X509Certificate
 import tech.httptoolkit.android.*
-import tech.httptoolkit.android.ca.CertInstallHelper
 import tech.httptoolkit.android.ca.INSTALL_CERT_REQUEST
 import tech.httptoolkit.android.ca.generateOrLoad
 import tech.httptoolkit.android.ca.launchInstallCaIntent
+import tech.httptoolkit.android.ca.saveCertToDownloads
 import tech.httptoolkit.android.ca.whereIsCertTrusted
 import tech.httptoolkit.android.intercept.LudoInterceptorConfig
 import tech.httptoolkit.android.ui.HttpToolkitTheme
@@ -165,7 +159,7 @@ class MainActivity : ComponentActivity(), CoroutineScope by MainScope() {
         mainState = ConnectionState.DISCONNECTED
     }
 
-    private suspend fun connectToVpn(config: ProxyConfig) {
+    private fun connectToVpn(config: ProxyConfig) {
         mainState = ConnectionState.CONNECTING
         currentProxyConfig = config
         val vpnIntent = VpnService.prepare(this)
@@ -248,7 +242,7 @@ class MainActivity : ComponentActivity(), CoroutineScope by MainScope() {
     @RequiresApi(Build.VERSION_CODES.Q)
     private suspend fun promptToManuallyInstallCert(cert: Certificate, repeatPrompt: Boolean = false) {
         if (!repeatPrompt) {
-            CertInstallHelper.saveCertToDownloads(this, cert as X509Certificate)
+            saveCertToDownloads(this, cert as X509Certificate)
         }
         withContext(Dispatchers.Main) {
             MaterialAlertDialogBuilder(this@MainActivity)

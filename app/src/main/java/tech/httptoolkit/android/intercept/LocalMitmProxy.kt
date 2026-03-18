@@ -114,12 +114,14 @@ class LocalMitmProxy(private val ca: GeneratedCa) : Runnable {
             }
             if (host?.contains(':') == true) host = host.substringBefore(':')
             extractAndLogLudoAuth(host, path, headers)
+            extractAndLogLudoSocketHandshake(method, host, path, headers)
             val targetHost = host ?: return
 
             val originSocket = java.net.Socket()
             originSocket.soTimeout = 15_000
             originSocket.connect(java.net.InetSocketAddress(targetHost, 443), 10_000)
-            val originSsl = javax.net.ssl.SSLSocketFactory.getDefault().createSocket(originSocket, targetHost, 443, true) as javax.net.ssl.SSLSocket
+            val originSslFactory = javax.net.ssl.SSLSocketFactory.getDefault() as javax.net.ssl.SSLSocketFactory
+            val originSsl = originSslFactory.createSocket(originSocket, targetHost, 443, true) as javax.net.ssl.SSLSocket
             originSsl.startHandshake()
             val originSslOut = originSsl.getOutputStream()
             val fullRequest = buildString {

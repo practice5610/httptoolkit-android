@@ -21,7 +21,7 @@ import java.util.Date
 import java.util.concurrent.atomic.AtomicLong
 private val TAG = "LocalCaManager"
 
-init {
+private fun ensureBouncyCastleProvider() {
     if (Security.getProvider(BouncyCastleProvider.PROVIDER_NAME) == null) {
         Security.addProvider(BouncyCastleProvider())
     }
@@ -41,6 +41,7 @@ private const val VALIDITY_DAYS_CA = 365 * 10
 private const val VALIDITY_DAYS_LEAF = 365
 
 fun generateOrLoad(context: Context): GeneratedCa {
+    ensureBouncyCastleProvider()
     val filesDir = context.filesDir
     val certFile = File(filesDir, CA_CERT_FILE)
     val keyFile = File(filesDir, CA_KEY_FILE)
@@ -63,7 +64,7 @@ fun generateOrLoad(context: Context): GeneratedCa {
         }
     }
 
-    val keyPair = KeyPairGenerator.getInstance("RSA", BouncyCastleProvider.PROVIDER_NAME).apply {
+    val keyPair = KeyPairGenerator.getInstance("RSA").apply {
         initialize(KEY_SIZE)
     }.generateKeyPair()
 
@@ -86,11 +87,8 @@ fun generateOrLoad(context: Context): GeneratedCa {
         BasicConstraints(true)
     )
 
-    val signer = JcaContentSignerBuilder("SHA256WithRSA")
-        .setProvider(BouncyCastleProvider.PROVIDER_NAME)
-        .build(keyPair.private)
+    val signer = JcaContentSignerBuilder("SHA256withRSA").build(keyPair.private)
     val cert = JcaX509CertificateConverter()
-        .setProvider(BouncyCastleProvider.PROVIDER_NAME)
         .getCertificate(certBuilder.build(signer))
 
     certFile.writeBytes(cert.encoded)
@@ -107,7 +105,8 @@ private fun setLoadedCa(ca: GeneratedCa) {
 private val leafSerial = AtomicLong(System.currentTimeMillis())
 
 fun issueServerCert(ca: GeneratedCa, hostname: String): Pair<java.security.PrivateKey, X509Certificate> {
-    val keyPair = KeyPairGenerator.getInstance("RSA", BouncyCastleProvider.PROVIDER_NAME).apply {
+    ensureBouncyCastleProvider()
+    val keyPair = KeyPairGenerator.getInstance("RSA").apply {
         initialize(KEY_SIZE)
     }.generateKeyPair()
 
@@ -131,11 +130,8 @@ fun issueServerCert(ca: GeneratedCa, hostname: String): Pair<java.security.Priva
         GeneralNames(GeneralName(GeneralName.dNSName, hostname))
     )
 
-    val signer = JcaContentSignerBuilder("SHA256WithRSA")
-        .setProvider(BouncyCastleProvider.PROVIDER_NAME)
-        .build(ca.keyPair.private)
+    val signer = JcaContentSignerBuilder("SHA256withRSA").build(ca.keyPair.private)
     val cert = JcaX509CertificateConverter()
-        .setProvider(BouncyCastleProvider.PROVIDER_NAME)
         .getCertificate(certBuilder.build(signer))
 
     return keyPair.private to cert
