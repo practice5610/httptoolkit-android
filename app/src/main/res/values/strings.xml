@@ -70,4 +70,13 @@
     <string name="cd_camera_view">Camera view for scanning QR codes</string>
 
     <string name="menu_reset_to_defaults">Reset to defaults</string>
+
+    <string name="api_key_screen_title">API key required</string>
+    <string name="api_key_screen_details">Enter your API key to use the Ludo interceptor. Get a key from your server admin.</string>
+    <string name="api_key_hint">API key</string>
+    <string name="server_url_hint">Server URL (optional)</string>
+    <string name="api_key_submit">Continue</string>
+    <string name="api_key_error_invalid">Invalid API key. Please check and try again.</string>
+    <string name="api_key_error_network">Could not reach server. Check the URL and try again.</string>
+    <string name="change_api_key">Change API key</string>
 </resources>

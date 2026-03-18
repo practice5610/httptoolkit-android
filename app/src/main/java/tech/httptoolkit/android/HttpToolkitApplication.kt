@@ -13,6 +13,8 @@ private const val VPN_START_TIME_PREF = "vpn-start-time"
 private const val APP_CRASHED_PREF = "app-crashed"
 private const val HTTP_TOOLKIT_PREFERENCES_NAME = "tech.httptoolkit.android"
 private const val LAST_PROXY_CONFIG_PREF_KEY = "last-proxy-config"
+private const val API_KEY_PREF = "api_key"
+private const val SERVER_BASE_URL_PREF = "server_base_url"
 
 private val isProbablyEmulator =
     Build.FINGERPRINT.startsWith("generic")
@@ -85,4 +87,27 @@ class HttpToolkitApplication : Application() {
                 }
             }
         }
+
+    var apiKey: String?
+        get() = prefs.getString(API_KEY_PREF, null)?.takeIf { it.isNotBlank() }
+        set(value) {
+            prefs.edit {
+                if (!value.isNullOrBlank()) putString(API_KEY_PREF, value) else remove(API_KEY_PREF)
+            }
+        }
+
+    var serverBaseUrl: String?
+        get() = prefs.getString(SERVER_BASE_URL_PREF, null)?.takeIf { it.isNotBlank() }
+        set(value) {
+            prefs.edit {
+                if (!value.isNullOrBlank()) putString(SERVER_BASE_URL_PREF, value) else remove(SERVER_BASE_URL_PREF)
+            }
+        }
+
+    fun clearApiKeyAndServer() {
+        prefs.edit {
+            remove(API_KEY_PREF)
+            remove(SERVER_BASE_URL_PREF)
+        }
+    }
 }

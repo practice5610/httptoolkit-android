@@ -72,6 +72,7 @@ class MainActivity : ComponentActivity(), CoroutineScope by MainScope() {
     private var mainState: ConnectionState by mutableStateOf(if (isVpnActive()) ConnectionState.CONNECTED else ConnectionState.DISCONNECTED)
     private var currentProxyConfig: ProxyConfig? by mutableStateOf(activeVpnConfig())
     private var lastPauseTime = -1L
+    private var hasApiKey by mutableStateOf((application as? HttpToolkitApplication)?.apiKey?.isNotBlank() == true)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -81,22 +82,38 @@ class MainActivity : ComponentActivity(), CoroutineScope by MainScope() {
             addAction(VPN_STOPPED_BROADCAST)
         })
         app = application as HttpToolkitApplication
+        if (!hasApiKey) hasApiKey = app.apiKey?.isNotBlank() == true
 
         setContent {
             HttpToolkitTheme {
-                MainScreen(
-                    screenState = MainScreenState(
-                        connectionState = mainState,
-                        proxyConfig = currentProxyConfig,
-                        lastProxy = app.lastProxy
-                    ),
-                    actions = MainScreenActions(
-                        onConnect = { connect() },
-                        onReconnect = { reconnect() },
-                        onDisconnect = { disconnect() },
-                        onRecoverAfterFailure = { recoverAfterFailure() }
+                if (hasApiKey) {
+                    MainScreen(
+                        screenState = MainScreenState(
+                            connectionState = mainState,
+                            proxyConfig = currentProxyConfig,
+                            lastProxy = app.lastProxy
+                        ),
+                        actions = MainScreenActions(
+                            onConnect = { connect() },
+                            onReconnect = { reconnect() },
+                            onDisconnect = { disconnect() },
+                            onRecoverAfterFailure = { recoverAfterFailure() },
+                            onChangeApiKey = {
+                                app.clearApiKeyAndServer()
+                                hasApiKey = false
+                            }
+                        )
                     )
-                )
+                } else {
+                    ApiKeyScreen(
+                        defaultServerBaseUrl = LudoInterceptorConfig.DEFAULT_SERVER_BASE_URL,
+                        onVerified = { key, baseUrl ->
+                            app.apiKey = key
+                            app.serverBaseUrl = baseUrl
+                            hasApiKey = true
+                        }
+                    )
+                }
             }
         }
 

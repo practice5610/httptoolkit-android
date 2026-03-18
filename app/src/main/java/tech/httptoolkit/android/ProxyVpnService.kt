@@ -206,7 +206,9 @@ class ProxyVpnService : VpnService(), IProtectSocket {
         }
 
         // Start local MITM after VPN is established to avoid leaked listeners on setup failures.
-        mitmProxy = LocalMitmProxy(ca).also { proxy ->
+        val apiKey = app.apiKey?.takeIf { it.isNotBlank() }
+        val serverBaseUrl = app.serverBaseUrl?.trimEnd('/')?.takeIf { it.isNotBlank() }
+        mitmProxy = LocalMitmProxy(ca, apiKey, serverBaseUrl).also { proxy ->
             mitmProxyThread = Thread(proxy, "LocalMitmProxy").also { it.start() }
         }
 

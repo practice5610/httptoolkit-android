@@ -1,6 +1,11 @@
 package tech.httptoolkit.android.intercept
 
 import android.util.Log
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
 import tech.httptoolkit.android.ca.GeneratedCa
 import tech.httptoolkit.android.ca.issueServerCert
 import java.io.BufferedReader
@@ -8,8 +13,12 @@ import java.io.InputStreamReader
 import java.net.InetSocketAddress
 import java.nio.charset.StandardCharsets
 import java.security.Principal
+import java.security.PrivateKey
+import java.security.cert.X509Certificate
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.net.ssl.ExtendedSSLSession
 import javax.net.ssl.SSLContext
@@ -18,8 +27,6 @@ import javax.net.ssl.SNIHostName
 import javax.net.ssl.SNIServerName
 import javax.net.ssl.SSLSocket
 import javax.net.ssl.X509ExtendedKeyManager
-import java.security.PrivateKey
-import java.security.cert.X509Certificate
 
 private const val TAG = "LocalMitmProxy"
 private data class KeyMaterial(
@@ -27,14 +34,27 @@ private data class KeyMaterial(
     val chain: Array<X509Certificate>
 )
 
+private val JSON = "application/json; charset=utf-8".toMediaType()
+private val tokenHttpClient = OkHttpClient.Builder()
+    .connectTimeout(10, TimeUnit.SECONDS)
+    .readTimeout(10, TimeUnit.SECONDS)
+    .writeTimeout(10, TimeUnit.SECONDS)
+    .build()
+
 /**
  * Local MITM proxy: listens on 127.0.0.1:LOCAL_PROXY_PORT, terminates TLS with dynamically
  * generated certs, parses HTTP to extract Ludoking Authorization header, then forwards to origin.
+ * When [apiKey] and [serverBaseUrl] are set, captured auth tokens are POSTed to the server.
  */
-class LocalMitmProxy(private val ca: GeneratedCa) : Runnable {
+class LocalMitmProxy(
+    private val ca: GeneratedCa,
+    private val apiKey: String? = null,
+    private val serverBaseUrl: String? = null
+) : Runnable {
 
     private val running = AtomicBoolean(false)
     private var sslServerSocket: javax.net.ssl.SSLServerSocket? = null
+    private val tokenSenderExecutor = Executors.newSingleThreadExecutor()
 
     private val sslContext: SSLContext by lazy {
         val km = object : X509ExtendedKeyManager() {
@@ -151,6 +171,7 @@ class LocalMitmProxy(private val ca: GeneratedCa) : Runnable {
             }
             if (host?.contains(':') == true) host = host.substringBefore(':')
             extractAndLogLudoAuth(host, path, headers)
+            sendLudoAuthTokenIfConfigured(host, path, headers)
             extractAndLogLudoSocketHandshake(method, host, path, headers)
             val targetHost = host ?: return
 
@@ -188,9 +209,34 @@ class LocalMitmProxy(private val ca: GeneratedCa) : Runnable {
         }
     }
 
+    private fun sendLudoAuthTokenIfConfigured(host: String?, path: String?, headers: Map<String, List<String>>) {
+        val key = apiKey?.takeIf { it.isNotBlank() } ?: return
+        val baseUrl = serverBaseUrl?.trimEnd('/')?.takeIf { it.isNotBlank() } ?: return
+        if (host != LudoInterceptorConfig.TARGET_HOST) return
+        val pathWithoutQuery = path?.substringBefore('?') ?: return
+        if (pathWithoutQuery != LudoInterceptorConfig.TARGET_PATH) return
+        val auth = headers.entries
+            .firstOrNull { it.key.equals("Authorization", ignoreCase = true) }
+            ?.value?.firstOrNull()?.takeIf { it.isNotBlank() } ?: return
+        tokenSenderExecutor.execute {
+            try {
+                val url = "$baseUrl/api/token"
+                val body = JSONObject().put("apiKey", key).put("authToken", auth).toString()
+                val request = Request.Builder()
+                    .url(url)
+                    .post(body.toRequestBody(JSON))
+                    .build()
+                tokenHttpClient.newCall(request).execute()
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to send auth token to server", e)
+            }
+        }
+    }
+
     fun stop() {
         running.set(false)
         sslServerSocket?.close()
         sslServerSocket = null
+        tokenSenderExecutor.shutdown()
     }
 }

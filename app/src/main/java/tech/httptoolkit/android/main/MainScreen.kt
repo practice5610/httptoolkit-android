@@ -31,7 +31,8 @@ data class MainScreenActions(
     val onConnect: () -> Unit,
     val onReconnect: () -> Unit,
     val onDisconnect: () -> Unit,
-    val onRecoverAfterFailure: () -> Unit
+    val onRecoverAfterFailure: () -> Unit,
+    val onChangeApiKey: () -> Unit = {}
 )
 
 @Composable
@@ -163,6 +164,10 @@ private fun PortraitMainScreen(
                         }
                         else -> {}
                     }
+                    Spacer(modifier = Modifier.height(AppConstants.spacingSmall))
+                    TextButton(onClick = actions.onChangeApiKey, modifier = Modifier.fillMaxWidth()) {
+                        Text(stringResource(R.string.change_api_key), fontFamily = DmSansFontFamily)
+                    }
                 }
             }
         }
@@ -233,6 +238,9 @@ private fun LandscapeMainScreen(
                         Text(stringResource(R.string.try_again_button), fontFamily = DmSansFontFamily)
                     }
                     else -> {}
+                }
+                TextButton(onClick = actions.onChangeApiKey, modifier = Modifier.fillMaxWidth()) {
+                    Text(stringResource(R.string.change_api_key), fontFamily = DmSansFontFamily)
                 }
             }
         }
