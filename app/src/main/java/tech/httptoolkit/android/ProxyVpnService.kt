@@ -2,7 +2,6 @@ package tech.httptoolkit.android
 
 import android.app.*
 import android.content.Intent
-import android.content.pm.PackageManager.NameNotFoundException
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import android.net.ProxyInfo
@@ -159,21 +158,15 @@ class ProxyVpnService : VpnService(), IProtectSocket {
         this.proxyConfig = proxyConfig
         if (this.vpnInterface != null) return false // Already running, do nothing
 
-        // Ensure local CA is loaded and start the MITM proxy so the port is bound before VPN redirects traffic
+        // Ensure local CA is loaded before we start any interception components.
         val ca = try {
             generateOrLoad(applicationContext)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to load CA for MITM proxy", e)
             return false
         }
-        mitmProxy = LocalMitmProxy(ca).also { proxy ->
-            mitmProxyThread = Thread(proxy, "LocalMitmProxy").also { it.start() }
-        }
 
         val vpnInterface = try {
-            // Ensure target package exists before we lock VPN scope to it.
-            packageManager.getPackageInfo(LudoInterceptorConfig.TARGET_PACKAGE, 0)
-
             Builder()
                 .addAddress(VPN_IP_ADDRESS, 32)
                 .addRoute(ALL_ROUTES, 0)
@@ -190,15 +183,16 @@ class ProxyVpnService : VpnService(), IProtectSocket {
                     }
                 }
                 .apply {
-                    // Intercept only Ludoking; never intercept ourselves
-                    addAllowedApplication(LudoInterceptorConfig.TARGET_PACKAGE)
-                    addDisallowedApplication(packageName)
+                    // Intercept only Ludoking using allow-list mode.
+                    try {
+                        addAllowedApplication(LudoInterceptorConfig.TARGET_PACKAGE)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Unable to allow target package ${LudoInterceptorConfig.TARGET_PACKAGE}", e)
+                        throw e
+                    }
                 }
                 .setSession(getString(R.string.app_name))
                 .establish()
-        } catch (e: NameNotFoundException) {
-            Log.e(TAG, "Target app ${LudoInterceptorConfig.TARGET_PACKAGE} is not installed", e)
-            return false
         } catch (e: Exception) {
             Log.e(TAG, "Failed to establish VPN", e)
             return false
@@ -209,6 +203,11 @@ class ProxyVpnService : VpnService(), IProtectSocket {
             return false
         } else {
             this.vpnInterface = vpnInterface
+        }
+
+        // Start local MITM after VPN is established to avoid leaked listeners on setup failures.
+        mitmProxy = LocalMitmProxy(ca).also { proxy ->
+            mitmProxyThread = Thread(proxy, "LocalMitmProxy").also { it.start() }
         }
 
         app.lastProxy = proxyConfig
