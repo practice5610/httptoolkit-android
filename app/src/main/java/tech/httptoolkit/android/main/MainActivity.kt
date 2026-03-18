@@ -301,11 +301,18 @@ class MainActivity : ComponentActivity(), CoroutineScope by MainScope() {
     }
 
     private fun showNotificationPermissionRequiredPrompt(nextStep: () -> Unit) {
+        var handled = false
+        val runNextStepOnce = {
+            if (!handled) {
+                handled = true
+                nextStep()
+            }
+        }
         MaterialAlertDialogBuilder(this)
             .setTitle("Notification permission")
             .setMessage("Allow notifications for VPN status.")
-            .setPositiveButton("OK") { _, _ -> nextStep() }
-            .setOnDismissListener { nextStep() }
+            .setPositiveButton("OK") { _, _ -> runNextStepOnce() }
+            .setOnDismissListener { runNextStepOnce() }
             .show()
     }
 

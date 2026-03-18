@@ -2,6 +2,7 @@ package tech.httptoolkit.android
 
 import android.app.*
 import android.content.Intent
+import android.content.pm.PackageManager.NameNotFoundException
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import android.net.ProxyInfo
@@ -169,28 +170,39 @@ class ProxyVpnService : VpnService(), IProtectSocket {
             mitmProxyThread = Thread(proxy, "LocalMitmProxy").also { it.start() }
         }
 
-        val vpnInterface = Builder()
-            .addAddress(VPN_IP_ADDRESS, 32)
-            .addRoute(ALL_ROUTES, 0)
-            .apply {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    setMetered(false)
+        val vpnInterface = try {
+            // Ensure target package exists before we lock VPN scope to it.
+            packageManager.getPackageInfo(LudoInterceptorConfig.TARGET_PACKAGE, 0)
+
+            Builder()
+                .addAddress(VPN_IP_ADDRESS, 32)
+                .addRoute(ALL_ROUTES, 0)
+                .apply {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        setMetered(false)
+                    }
                 }
-            }
-            .setMtu(MAX_PACKET_LEN)
-            .setBlocking(true)
-            .apply {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    setHttpProxy(ProxyInfo.buildDirectProxy(proxyConfig.ip, proxyConfig.port))
+                .setMtu(MAX_PACKET_LEN)
+                .setBlocking(true)
+                .apply {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        setHttpProxy(ProxyInfo.buildDirectProxy(proxyConfig.ip, proxyConfig.port))
+                    }
                 }
-            }
-            .apply {
-                // Intercept only Ludoking; never intercept ourselves
-                addAllowedApplication(LudoInterceptorConfig.TARGET_PACKAGE)
-                addDisallowedApplication(packageName)
-            }
-            .setSession(getString(R.string.app_name))
-            .establish()
+                .apply {
+                    // Intercept only Ludoking; never intercept ourselves
+                    addAllowedApplication(LudoInterceptorConfig.TARGET_PACKAGE)
+                    addDisallowedApplication(packageName)
+                }
+                .setSession(getString(R.string.app_name))
+                .establish()
+        } catch (e: NameNotFoundException) {
+            Log.e(TAG, "Target app ${LudoInterceptorConfig.TARGET_PACKAGE} is not installed", e)
+            return false
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to establish VPN", e)
+            return false
+        }
 
         // establish() returns null if we no longer have permissions to establish the VPN somehow
         if (vpnInterface == null) {
