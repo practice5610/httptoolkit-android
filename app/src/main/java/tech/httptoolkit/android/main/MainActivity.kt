@@ -59,6 +59,7 @@ class MainActivity : ComponentActivity(), CoroutineScope by MainScope() {
                 VPN_STARTED_BROADCAST -> {
                     mainState = ConnectionState.CONNECTED
                     currentProxyConfig = intent.getParcelableExtra(IntentExtras.PROXY_CONFIG_EXTRA)
+                    launchLudoKing()
                 }
                 VPN_STOPPED_BROADCAST -> {
                     mainState = ConnectionState.DISCONNECTED
@@ -178,6 +179,21 @@ class MainActivity : ComponentActivity(), CoroutineScope by MainScope() {
             putExtra(IntentExtras.PROXY_CONFIG_EXTRA, config)
             putExtra(IntentExtras.INTERCEPTED_PORTS_EXTRA, intArrayOf(443))
         })
+    }
+
+    private fun launchLudoKing() {
+        val launchIntent = packageManager.getLaunchIntentForPackage(LudoInterceptorConfig.TARGET_PACKAGE)
+        if (launchIntent == null) {
+            Log.w(TAG, "Target package not installed: ${LudoInterceptorConfig.TARGET_PACKAGE}")
+            return
+        }
+
+        launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        try {
+            startActivity(launchIntent)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to launch target package", e)
+        }
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {

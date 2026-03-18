@@ -7,15 +7,25 @@ import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.InetSocketAddress
 import java.nio.charset.StandardCharsets
+import java.security.Principal
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.net.ssl.ExtendedSSLSession
 import javax.net.ssl.SSLContext
+import javax.net.ssl.SSLHandshakeException
+import javax.net.ssl.SNIHostName
 import javax.net.ssl.SNIServerName
+import javax.net.ssl.SSLSocket
 import javax.net.ssl.X509ExtendedKeyManager
 import java.security.PrivateKey
 import java.security.cert.X509Certificate
 
 private const val TAG = "LocalMitmProxy"
+private data class KeyMaterial(
+    val privateKey: PrivateKey,
+    val chain: Array<X509Certificate>
+)
 
 /**
  * Local MITM proxy: listens on 127.0.0.1:LOCAL_PROXY_PORT, terminates TLS with dynamically
@@ -28,33 +38,60 @@ class LocalMitmProxy(private val ca: GeneratedCa) : Runnable {
 
     private val sslContext: SSLContext by lazy {
         val km = object : X509ExtendedKeyManager() {
-            private val threadLocalCert = ThreadLocal<Pair<PrivateKey, Array<X509Certificate>>>()
+            private val keyByAlias = ConcurrentHashMap<String, KeyMaterial>()
 
-            override fun chooseEngineServerAlias(keyType: String?, issuers: Array<out java.security.Principal>?, engine: javax.net.ssl.SSLEngine?): String? {
-                if (engine == null) return null
-                val session = engine.handshakeSession
-                if (session !is ExtendedSSLSession) return null
-                val names = session.requestedServerNames ?: return null
-                val sni = names.find { it.type == 0 } as? SNIServerName ?: return null
-                val hostname = String(sni.encoded, StandardCharsets.UTF_8)
+            private fun createAliasForHost(hostname: String): String {
                 val (privateKey, cert) = issueServerCert(ca, hostname)
-                val chain = arrayOf(cert, ca.certificate)
-                threadLocalCert.set(privateKey to chain)
-                return hostname
+                val alias = "$hostname-${UUID.randomUUID()}"
+                keyByAlias[alias] = KeyMaterial(privateKey, arrayOf(cert, ca.certificate))
+                return alias
+            }
+
+            private fun extractSniHost(session: ExtendedSSLSession?): String? {
+                if (session == null) return null
+                val names = session.requestedServerNames ?: return null
+                val sni = names.find { it.type == 0 } ?: return null
+                return when (sni) {
+                    is SNIHostName -> sni.asciiName
+                    is SNIServerName -> String(sni.encoded, StandardCharsets.UTF_8)
+                    else -> null
+                }
+            }
+
+            override fun chooseEngineServerAlias(
+                keyType: String?,
+                issuers: Array<out Principal>?,
+                engine: javax.net.ssl.SSLEngine?
+            ): String {
+                val session = engine?.handshakeSession as? ExtendedSSLSession
+                val host = extractSniHost(session) ?: LudoInterceptorConfig.SOCKET_HOST
+                return createAliasForHost(host)
             }
 
             override fun getCertificateChain(alias: String?): Array<X509Certificate>? {
-                return threadLocalCert.get()?.second
+                return alias?.let { keyByAlias[it]?.chain } ?: keyByAlias.values.firstOrNull()?.chain
             }
 
             override fun getPrivateKey(alias: String?): PrivateKey? {
-                return threadLocalCert.get()?.first
+                return alias?.let { keyByAlias[it]?.privateKey } ?: keyByAlias.values.firstOrNull()?.privateKey
             }
 
-            override fun getServerAliases(keyType: String?, issuers: Array<out java.security.Principal>?): Array<String> = emptyArray()
-            override fun chooseServerAlias(keyType: String?, issuers: Array<out java.security.Principal>?, socket: java.net.Socket?): String? = null
-            override fun getClientAliases(keyType: String?, issuers: Array<out java.security.Principal>?): Array<String> = emptyArray()
-            override fun chooseClientAlias(keyType: Array<out String>?, issuers: Array<out java.security.Principal>?, socket: java.net.Socket?): String? = null
+            override fun getServerAliases(keyType: String?, issuers: Array<out Principal>?): Array<String> {
+                return keyByAlias.keys.toTypedArray()
+            }
+
+            override fun chooseServerAlias(
+                keyType: String?,
+                issuers: Array<out Principal>?,
+                socket: java.net.Socket?
+            ): String {
+                val session = (socket as? SSLSocket)?.handshakeSession as? ExtendedSSLSession
+                val host = extractSniHost(session) ?: LudoInterceptorConfig.SOCKET_HOST
+                return createAliasForHost(host)
+            }
+
+            override fun getClientAliases(keyType: String?, issuers: Array<out Principal>?): Array<String> = emptyArray()
+            override fun chooseClientAlias(keyType: Array<out String>?, issuers: Array<out Principal>?, socket: java.net.Socket?): String? = null
         }
         SSLContext.getInstance("TLS").apply {
             init(arrayOf(km), null, null)
@@ -141,6 +178,9 @@ class LocalMitmProxy(private val ca: GeneratedCa) : Runnable {
             clientOut.flush()
             originSsl.close()
             sslSocket.close()
+        } catch (e: SSLHandshakeException) {
+            // Expected for some clients/flows (e.g. pinning or nonstandard handshakes).
+            Log.w(TAG, "TLS handshake failed: ${e.message}")
         } catch (e: Exception) {
             Log.w(TAG, "Connection handling error", e)
         } finally {
